@@ -9,12 +9,15 @@
  * Once active, fan speed is modulated using radiator temperature as a ratio between maximum and ambient temperatures.
  */
 
-#include <OneWire.h>
-#include <DallasTemperature.h>
-#include <PWM.h>
-#include <QList.h>
-#include <LinearRegression.h>
-#include <MemoryFree.h>
+// available from standard library
+#include <OneWire.h> // one-wired sensors
+#include <DallasTemperature.h> // DS18B20U temp sensor
+#include <QList.h> // linked lists
+
+// copy these from git into local sketchbook path
+#include "PWM.h" // PWN fan control
+#include "LinearRegression.h" // linear regression
+#include "MemoryFree.h" // memory monitoring
 
 // general settings
 const bool FRONT_RADIATOR = true; // set to true for front or false for rear radiator
@@ -286,7 +289,7 @@ class History
     float calculateSlopeDiff()    
     {
       /*
-       * - Calculate slope and intercept on temperature difference
+       * - Calculate slope on temperature difference
        */
 
       LinearRegression regression_model = LinearRegression(0, ambient_temps.size());
@@ -302,7 +305,7 @@ class History
 
       double regression_values[] = {};
       regression_model.getValues(regression_values);
-      return regression_values[0];
+      return regression_values[0]; //slope is 0, intercept is 1
     }
 };
 
@@ -400,7 +403,7 @@ byte set_fan(float temp_radiator, float temp_ambient, byte cooldown_timer_)
   g_printer->temp_stop = temp_stop;
 
   // determine cooldown status
-  bool cooldown_is_active = cooldown_timer_ != 0;
+  bool cooldown_is_active = cooldown_timer_ > 0;
 
   // determine if fans should be disabled
   if (!temp_is_increasing && temp_is_low)

@@ -1,1 +1,1 @@
-Ga naar http://www.arduino.cc/en/Guide/Libraries voor meer informatie over het installeren van bibliotheken
+Go to http://www.arduino.cc/en/Guide/Libraries on how to install these libraries
