@@ -1,0 +1,33 @@
+@startuml
+state c1 <<choice>>
+state enabling{
+  state 3_cold_start <<entryPoint>>
+  state 1_hot_start<<entryPoint>>
+}
+state disabled {
+  state 2_idle<<entryPoint>>
+}
+disabled --> c1
+c1 --> 3_cold_start : temp_is_increasing
+c1--> 1_hot_start: temp_is_high
+c1--> 2_idle: else
+
+state enabled{
+  state 6_cooldown<<entryPoint>>
+  state 4_active<<entryPoint>>
+  state 7_active<<entryPoint>>
+}
+state disabling{
+  state 5_disable<<entryPoint>>
+}
+state c2 <<choice>>
+enabled --> c2
+c2 --> 6_cooldown: cooldown_is_active
+c2 --> 4_active: temp_is_high
+c2 --> 7_active: temp_is_increasing
+c2 --> 5_disable: else
+
+disabling --> disabled
+enabling --> enabled
+
+@enduml

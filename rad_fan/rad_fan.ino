@@ -385,9 +385,8 @@ byte set_fan(float temp_radiator, float temp_ambient, byte cooldown_timer_)
    
   // duty cycle var and status should have persist globally
   static byte dutycycle;
-  static byte status_; // 0: disabled; 1: enabled; 2: disabling; 3: enabling
-  bool fan_is_enabled = dutycycle != 0;
-
+  static byte status_; // 1: hot start; 2: idle; 3: cold start; 4: active; 5: disable; 6: cooldown; 7: active
+     
   // calculate avg and slope
   float temp_rad_average = g_history->calculateAverageRadiator();
   float temp_amb_average = g_history->calculateAverageAmbient();
@@ -396,64 +395,39 @@ byte set_fan(float temp_radiator, float temp_ambient, byte cooldown_timer_)
   g_printer->temp_amb_average = temp_amb_average;
   g_printer->temp_slope = temp_slope;
 
-  // detertime temp threshold condtionals
+  // detertime threshold condtionals
   float temp_stop = temp_amb_average * DEACTIVATION_RATIO;
-  bool temp_is_low = temp_rad_average < temp_stop;
+  bool temp_is_high = temp_rad_average > temp_stop;
   bool temp_is_increasing = temp_slope >= g_temp_threshold_per_sample;
-  g_printer->temp_stop = temp_stop;
-
-  // determine cooldown status
+  bool fan_is_enabled = dutycycle != 0;
   bool cooldown_is_active = cooldown_timer_ > 0;
+  g_printer->temp_stop = temp_stop; 
 
-  // determine if fans should be disabled
-  if (!temp_is_increasing && temp_is_low)
+  if(!fan_is_enabled)
   {
-    // when fans are already inactive and have to remain so: only set status 
-    if (!fan_is_enabled)
+    if(temp_is_increasing || temp_is_high)
     {
-      status_ = 0;
-    }
-    // if active
-    else 
-    {
-      // if cooldown is over: disable fans 
-      if (!cooldown_is_active)
-      {
-        digitalWrite(GATE_PIN, LOW);
-        dutycycle = 0;
-        status_ = 2;
-      }
-      // if cooldown is running: only write status
-      else
-      {
-        status_ = 4; 
-      }
-    }
-  }
-  // determine if fan should be enabled
-  else
-  {
-    // if fans are already active and have to remain so: adjust fan speed
-    if(fan_is_enabled)
-    {
-      dutycycle = calculateDutyCycle(temp_ambient, temp_radiator);
-      status_ = 1;
-    }
-    // if inactive 
-    else 
-    {
-      //  if cooldown is over, or if temp in increasing: kickstart fan to full power 
-      if (temp_is_increasing || !cooldown_is_active)
-      {
         digitalWrite(GATE_PIN, HIGH);
         dutycycle = UINT8_MAX;
-        status_ = 3;
-      }
-      // if cooldown is in effect: only write status 
-      else
-      {
-        status_ = 5; 
-      }
+        status_ = temp_is_increasing ? 3 : 1;
+    }
+    else
+    {
+      status_ = 2;
+    }
+  }
+  else
+  {
+    if(temp_is_increasing || temp_is_high || cooldown_is_active)
+    {
+      dutycycle = calculateDutyCycle(temp_ambient, temp_radiator);
+      status_ = temp_is_increasing ? 7 : temp_is_high ? 4 : 6;      
+    }
+    else
+    {
+      digitalWrite(GATE_PIN, LOW);
+      dutycycle = 0;
+      status_ = 5;
     }
   }
   
@@ -489,7 +463,7 @@ void loop()
       g_printer->temp_radiator = temp_radiator;
       g_printer->temp_ambient = temp_ambient;
 
-      byte status_; // 0: disabled; 1: enabled; 2: disabling; 3: enabling; 4: cooldown prevents disabling; 5: cooldown prevents enabling
+      byte status_; // 1: hot start; 2: idle; 3: cold start; 4: active; 5: disable; 6: cooldown; 7: active
       // only update fan every TIMESTEP_UPDATE seconds
       if(counter % (TIMESTEP_UPDATE / TIMESTEP) == 0)
       {
@@ -498,7 +472,7 @@ void loop()
         g_printer->printValues();
       
         // if fan is enabling/disabling or cooldown timer is counting, increment cooldown timer
-        if(status_ == 2 || status_ == 3 || cooldown_timer > 0) 
+        if(status_ == 1 || status_ == 3 || status_ == 5 || cooldown_timer > 0) 
         {
           cooldown_timer++;
         }
