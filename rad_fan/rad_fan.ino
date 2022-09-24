@@ -29,10 +29,10 @@ const byte GATE_PIN = 8; // mosfet pin
 const byte PWM_PIN = 9; // fan modulation pin
 
 // temperature and sampling settings
-const byte TIMESTEP = 3; // seconds between main loop iterations
-const byte TIMESTEP_UPDATE = 15; // seconds between updates
+const byte TIMESTEP_MAIN = 3; // seconds between main loop iterations
+const byte TIMESTEP_UPDATE = 15; // seconds between updates TODO 15
 const float N_MINUTES_REGRESSION = 0.5; // length of temperature sample in minutes
-const float N_MINUTES_AVERAGING = 6.5; // length of temperature sample in minutes
+const float N_MINUTES_AVERAGING = 6; // length of temperature sample in minutes
 const float TEMP_THRESHOLD_PER_MINUTE = 1; // minimum temperature increase per minute to activate fan 
 const float DEACTIVATION_RATIO = 1.25; // stopping temp as ratio between ambient and max temp
 const float TEMP_MIN = 13; // mininum expected temperature
@@ -88,10 +88,10 @@ struct Printer
     Serial.println();
   }
 
-  Printer()
+  static void printHeader()
   {
     /*
-     * Instantiate new printer
+     * Print header line
      */
     Serial.println("\nsecondsElapsed,mem,status,cooldown,tempRadiator,tempAmbient,tempSlope,tempRatio,tempStop,tempRadAverage,tempAmbAverage,dutyCycle");
   }
@@ -100,8 +100,7 @@ struct Printer
   {
     /*
      * Print set values
-     */
-     
+     */    
     // calculate elapsed time
     unsigned long current_time = millis();
     unsigned long elapsed_time = current_time - start_time;
@@ -131,15 +130,13 @@ class Util
 {
   /*
    * Just some utility functions grouped together
-   */
-   
+   */ 
   public:
     static void setTemperatureToArguments(float& temp_radiator, float& temp_ambient)
     {
       /**
        * Obtain temperature measurements and set to arguments
-       */
-       
+       */       
       g_sensors->requestTemperatures();
       temp_radiator = g_sensors->getTempCByIndex((int)FRONT_RADIATOR);
       temp_ambient = g_sensors->getTempCByIndex((int)!FRONT_RADIATOR);
@@ -151,16 +148,7 @@ class Util
        * Scale (and possibly truncate) value into range 0-1
        */       
       float standardized = (value - mininum) / (maximum - mininum);
-    
-      if(standardized < 0)
-      {
-        standardized = 0;
-      }
-      else if (standardized > 1)
-      {
-        standardized = 1;
-      }
-      
+      standardized = standardized < 0 ? 0 : standardized > 1 ? 1 : standardized;
       return standardized;
     }
 };
@@ -169,8 +157,7 @@ class History
 {
   /*
    * History class tracks temperature history and provides regression and averaging methods
-   */
-   
+   */  
   private:
     class compressedValueList 
     {
@@ -220,7 +207,6 @@ class History
       /*
        * Calculate average on radiator temperature
        */
-
       float sum = 0;
 
       for(int i = 0; i < temperatures.size(); i++)
@@ -231,31 +217,30 @@ class History
       return sum / temperatures.size();
     }
 
-    compressedValueList radiator_temps; // used for averaging and regression
-    compressedValueList ambient_temps; // used for regression
+    compressedValueList radiator_temps;
+    compressedValueList ambient_temps;
     
   public:
-    History(int n_avg_samples, int n_rgr_samples)
+    History(int n_radiator_samples, int n_ambient_samples)
     {
       /**
        * Construct history object
-       * - n_avg_samples is number of samples used to calculate average
-       * - n_rgr_samples is number of samples used to regression model
+       * - n_radiator_samples is number radiator samples stored
+       * - n_ambient_samples is number of ambient samples stored
        * - At init, history is assumed to be the current temperature for the specified number of samples
        */
-
       // get current temperature
       float temp_radiator;
       float temp_ambient;
       Util::setTemperatureToArguments(temp_radiator, temp_ambient);
 
       // internal lists initialize to current temp for specified length
-      for(int i = 0; i < max(n_avg_samples, n_rgr_samples); i++)
+      for(int i = 0; i < n_radiator_samples; i++)
       {
         this->radiator_temps.push_front(temp_radiator);
       }
 
-      for(int i = 0; i < n_rgr_samples; i++)
+      for(int i = 0; i < n_ambient_samples; i++)
       {
         this->ambient_temps.push_front(temp_ambient);
       }
@@ -265,8 +250,7 @@ class History
     {
       /**
        * Add current temperature values to history
-       */
-       
+       */       
       // containers are FIFO; keep at fixed length
       radiator_temps.pop_back();
       ambient_temps.pop_back();
@@ -291,16 +275,13 @@ class History
       /*
        * - Calculate slope on temperature difference
        */
+      LinearRegression regression_model = LinearRegression(0, radiator_temps.size());
 
-      LinearRegression regression_model = LinearRegression(0, ambient_temps.size());
-
-      for(int i = 0; i < ambient_temps.size(); i++)
+      for(int i = 0; i < radiator_temps.size(); i++)
       {
-        int reverse_index = ambient_temps.size() - i - 1;
+        int reverse_index = radiator_temps.size() - i - 1;
         float temp_radiator = radiator_temps.get(reverse_index);
-        float temp_ambient = ambient_temps.get(reverse_index);
-        float temp_diff = temp_radiator - temp_ambient;
-        regression_model.learn(i, temp_diff);
+        regression_model.learn(i, temp_radiator);
       }
 
       double regression_values[] = {};
@@ -316,20 +297,10 @@ Printer *g_printer; // provides easy printing functionality
 void setup() 
 {
   /*
-   * Ran this once at initialization
-   */
-  
+   * Run this once at initialization
+   */  
   // start serial port for debugging
   Serial.begin(9600);
-  Printer::printNice("FRONT_RADIATOR",FRONT_RADIATOR);
-  Printer::printNice("TEMP_MIN",TEMP_MIN);
-  Printer::printNice("TEMP_MAX",TEMP_MAX);
-  Printer::printNice("TIMESTEP",TIMESTEP);
-  Printer::printNice("TIMESTEP_UPDATE",TIMESTEP_UPDATE);
-  Printer::printNice("DEACTIVATION_RATIO",DEACTIVATION_RATIO);
-  Printer::printNice("REAL_MIN_DUTYCYCLE",REAL_MIN_DUTYCYCLE);
-  Printer::printNice("REAL_MAX_DUTYCYCLE",REAL_MAX_DUTYCYCLE);
-  Printer::printNice("TEMP_THRESHOLD_PER_MINUTE",TEMP_THRESHOLD_PER_MINUTE);
   
   // set pin controlling fan mosfet power gate to output mode
   pinMode(GATE_PIN, OUTPUT);
@@ -343,37 +314,49 @@ void setup()
   g_is_init_success = SetPinFrequencySafe(PWM_PIN, 25000);
 
   // convert temp slope threshold per minute to threshold per sample
-  float samples_per_minute = 60. / TIMESTEP;
+  float samples_per_minute = 60. / TIMESTEP_MAIN;
   g_temp_threshold_per_sample = TEMP_THRESHOLD_PER_MINUTE / samples_per_minute;
+
+  // instantiate custom classes
+  // TODO
+  int n_radiator_samples = samples_per_minute * N_MINUTES_REGRESSION;
+  int n_ambient_samples = samples_per_minute * N_MINUTES_AVERAGING;
+  g_history = new History(n_radiator_samples, n_ambient_samples);
+  g_printer = new Printer();
+
+  // some values to print at init
+  Printer::printNice("FRONT_RADIATOR",FRONT_RADIATOR);
+  Printer::printNice("TEMP_MIN",TEMP_MIN);
+  Printer::printNice("TEMP_MAX",TEMP_MAX);
+  Printer::printNice("TIMESTEP_MAIN",TIMESTEP_MAIN);
+  Printer::printNice("TIMESTEP_UPDATE",TIMESTEP_UPDATE);
+  Printer::printNice("DEACTIVATION_RATIO",DEACTIVATION_RATIO);
+  Printer::printNice("REAL_MIN_DUTYCYCLE",REAL_MIN_DUTYCYCLE);
+  Printer::printNice("REAL_MAX_DUTYCYCLE",REAL_MAX_DUTYCYCLE);
+  Printer::printNice("TEMP_THRESHOLD_PER_MINUTE",TEMP_THRESHOLD_PER_MINUTE);
   Printer::printNice("\nsamples_per_minute", samples_per_minute);
   Printer::printNice("g_temp_threshold_per_sample", g_temp_threshold_per_sample);
   Printer::printNice("cooldown", UINT8_MAX / (60. / TIMESTEP_UPDATE));
-
-  // instantiate custom classes
-  int c_n_averaging_samples = samples_per_minute * N_MINUTES_AVERAGING;
-  int c_n_regression_samples = samples_per_minute * N_MINUTES_REGRESSION;
   Printer::printNice("N_MINUTES_AVERAGING", N_MINUTES_AVERAGING);
   Printer::printNice("N_MINUTES_REGRESSION", N_MINUTES_REGRESSION);
-  Printer::printNice("c_n_averaging_samples", c_n_averaging_samples);
-  Printer::printNice("c_n_regression_samples", c_n_regression_samples);
-  g_history = new History(c_n_averaging_samples, c_n_regression_samples);
-  g_printer = new Printer();
+  Printer::printNice("n_radiator_samples", n_radiator_samples);
+  Printer::printNice("n_ambient_samples", n_ambient_samples);
+  Printer::printHeader();
 }
 
 byte calculateDutyCycle(float temp_ambient, float temp_radiator) 
 {
   /*
    * Calculate duty cycle based on radiator temperature relative to ambient and max temp
-   */  
-   
+   */    
   // calculate temp ratio relative to ambient and max temp
   float temp_ratio = Util::scale(temp_radiator, temp_ambient, TEMP_MAX);
   g_printer->temp_ratio = temp_ratio;
   
   // convert temp ratio into duty cycle value
-  byte c_min_dutycycle = round(REAL_MIN_DUTYCYCLE * UINT8_MAX);
-  byte c_dutycycle_range = round(REAL_MAX_DUTYCYCLE * UINT8_MAX) - c_min_dutycycle;
-  byte dutycycle = round(temp_ratio * c_dutycycle_range + c_min_dutycycle); 
+  byte min_dutycycle = round(REAL_MIN_DUTYCYCLE * UINT8_MAX);
+  byte dutycycle_range = round(REAL_MAX_DUTYCYCLE * UINT8_MAX) - min_dutycycle;
+  byte dutycycle = round(temp_ratio * dutycycle_range + min_dutycycle); 
   return dutycycle;
 }
 
@@ -381,8 +364,7 @@ byte set_fan(float temp_radiator, float temp_ambient, byte cooldown_timer_)
 {
   /*
    * Determine whether to enable (and modulate) or disable fan. Sets fan PWM signal.
-   */
-   
+   */  
   // duty cycle var and status should have persist globally
   static byte dutycycle;
   static byte status_; // 1: hot start; 2: idle; 3: cold start; 4: active; 5: disable; 6: cooldown; 7: active
@@ -396,10 +378,11 @@ byte set_fan(float temp_radiator, float temp_ambient, byte cooldown_timer_)
   g_printer->temp_slope = temp_slope;
 
   // detertime threshold condtionals
+  // TODO
+  bool fan_is_enabled = dutycycle != 0;
+  bool temp_is_increasing = temp_slope >= g_temp_threshold_per_sample;
   float temp_stop = temp_amb_average * DEACTIVATION_RATIO;
   bool temp_is_high = temp_rad_average > temp_stop;
-  bool temp_is_increasing = temp_slope >= g_temp_threshold_per_sample;
-  bool fan_is_enabled = dutycycle != 0;
   bool cooldown_is_active = cooldown_timer_ > 0;
   g_printer->temp_stop = temp_stop; 
 
@@ -443,14 +426,13 @@ void loop()
   /*
    * Repeat this over and over
    */
-
   // if not in test mode...
   if(TEST_RATIO < 0) 
   {    
     // if init was sucessfull...
     if(g_is_init_success)
     {
-      // these variables should have global lifetime
+      // these variables have global lifetime (but are still scoped within this function)
       static byte counter; // used to determine at what interval to update (see TIMESTEP_UPDATE)
       static byte cooldown_timer; // fan is guaranteed to be (de)activated for 255 iterations of TIMESTEP_UPDATE
       g_printer->cooldown = cooldown_timer;
@@ -465,7 +447,7 @@ void loop()
 
       byte status_; // 1: hot start; 2: idle; 3: cold start; 4: active; 5: disable; 6: cooldown; 7: active
       // only update fan every TIMESTEP_UPDATE seconds
-      if(counter % (TIMESTEP_UPDATE / TIMESTEP) == 0)
+      if(counter % (TIMESTEP_UPDATE / TIMESTEP_MAIN) == 0)
       {
         // determine fan activation mode
         status_ = set_fan(temp_radiator, temp_ambient, cooldown_timer);
@@ -498,5 +480,5 @@ void loop()
   }
 
   // loop delay
-  delay(TIMESTEP * 1000);
+  delay(TIMESTEP_MAIN * 1000);
 }
