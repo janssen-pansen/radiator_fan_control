@@ -23,7 +23,7 @@ namespace rad_fan
   namespace settings
   {
     // general settings
-    const bool FRONT_RADIATOR = true; // set to true for front or false for rear radiator
+    const bool FRONT_RADIATOR = false; // set to true for front or false for rear radiator
     const float TEST_RATIO = -1; // set to x<0 to disable test mode, otherwise 0<=g_test_duty_cycle<=1
     
     // arduino settings
@@ -36,25 +36,25 @@ namespace rad_fan
     const byte TIMESTEP_MAIN = 5; // main loop interval (in seconds)
     const byte TIMESTEP_UPDATE = 15; // update interval (in seconds)
     const byte SLOPE_INTERVAL = 5; // regression interval (in seconds)
-    const int SLOPE_LENGTH = 180; // regression window (in seconds)
+    const int SLOPE_LENGTH = 30; // regression window (in seconds)
     const byte SLOPE_THRESHOLD = 1; // minimum temperature increase to activate fan (per minute)
     const byte AVERAGING_INTERVAL = 15; // averaging interval (in seconds)
-    const int AVERAGING_LENGTH = 600; // averaging window (in seconds)
+    const int AVERAGING_LENGTH = 900; // averaging window (in seconds)
     
     // temperature settings
-    const float DEACTIVATION_RATIO = 1.25; // stopping temp as ratio between ambient and max temp
+    const float DEACTIVATION_RATIO = 1.2; // stopping temp as ratio between ambient and max temp
     const float TEMP_MIN = 15; // mininum expected temperature
     const float TEMP_MAX = 50; // maximum expected temperature
     
     // minimum and maximum fan duty cycles
-    const float REAL_MIN_DUTYCYCLE = FRONT_RADIATOR ? 0.35: 0.4; 
-    const float REAL_MAX_DUTYCYCLE = FRONT_RADIATOR ? 0.65 : 0.75;
+    const float REAL_MIN_DUTYCYCLE = FRONT_RADIATOR ? 0.75: 0.7; 
+    const float REAL_MAX_DUTYCYCLE = FRONT_RADIATOR ? 1 : 0.8;
   }
   
   // variables used in loop() but initialized in setup()
-  const DallasTemperature *sensor; // temperature sensor object
-  bool init_success; // did init succeed?
-  float slope_max_per_sample; // global just for one-time print
+  const DallasTemperature *sensor;
+  bool init_success; 
+  float slope_max_per_sample;
   
   namespace printer
   {
@@ -96,7 +96,7 @@ namespace rad_fan
       /*
        * Print header line
        */
-      Serial.println("\nsecondsElapsed,mem,status,cooldown,tempRadiator,tempAmbient,tempSlope,tempRatio,tempStop,tempRadAverage,tempAmbAverage,dutyCycle");
+      Serial.print("\nsecondsElapsed,mem,status,cooldown,tempRadiator,tempAmbient,tempSlope,tempRatio,tempStop,tempRadAverage,tempAmbAverage,dutyCycle");
     }
   
     void printValues()
@@ -114,17 +114,14 @@ namespace rad_fan
       float values[] = {seconds_elapsed, free_memory, status_, cooldown, temp_radiator, temp_ambient,
         temp_slope, temp_ratio, temp_stop, temp_rad_average, temp_amb_average, dutycycle};
       int n_items = sizeof(values)/sizeof(values[0]);
-      
+
+      Serial.println();
       for(int i = 0; i < n_items; i++)
       {
         printer::printDowncasted(values[i]);
-        if(i < n_items - 1)
+        if(i < n_items)
         {
           Serial.print(", ");
-        }
-        else
-        {
-          Serial.println();
         }
       }
     }
@@ -431,6 +428,7 @@ void loop()
       {
         rad_fan::history_radiator_fine->recordTemp(temp_radiator);
         rad_fan::printer::temp_radiator = temp_radiator;
+        Serial.print("s");
       }
       
       if(counter % byte(ceil(float(AVERAGING_INTERVAL) / TIMESTEP_MAIN)) == 0)
@@ -438,6 +436,7 @@ void loop()
         rad_fan::history_radiator_course->recordTemp(temp_radiator);
         rad_fan::history_ambient->recordTemp(temp_ambient);
         rad_fan::printer::temp_ambient = temp_ambient;
+        Serial.print("a");
       }
 
       byte status_; // 1: hot start; 2: idle; 3: cold start; 4: active; 5: disable; 6: cooldown; 7: active
@@ -453,6 +452,7 @@ void loop()
         {
           cooldown_timer++;
         }
+        Serial.print("u");
       }    
         
       counter++;
@@ -476,4 +476,5 @@ void loop()
 
   // loop delay
   delay(TIMESTEP_MAIN * 1000);
+  Serial.print(".");
 }
